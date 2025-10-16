@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from todo import todo_router
+from model import Todo
+from model import TodoItem
 app = FastAPI()
 @app.get("/")
 async def welcome() -> dict:
