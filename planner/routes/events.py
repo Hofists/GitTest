@@ -1,61 +1,81 @@
-from fastapi import APIRouter, Body, HTTPException, status
-from models.events import Event
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlmodel import select, Session
+from database.connection import get_session
+from models.events import Event, EventUpdate
 from typing import List
 
 event_router = APIRouter(tags=["Events"])
 
-events = []
-
 @event_router.get("/", response_model=List[Event])
-async def retrieve_all_events() -> List[Event]:
-    """Получить все события"""
+async def retrieve_all_events(session: Session = Depends(get_session)) -> List[Event]:
+    """Получить все события из БАЗЫ ДАННЫХ"""
+    statement = select(Event)
+    events = session.exec(statement).all()
     return events
 
 @event_router.get("/{id}", response_model=Event)
-async def retrieve_event(id: int) -> Event:
-    """Получить событие по ID"""
-    for event in events:
-        if event.id == id:
-            return event
+async def retrieve_event(id: int, session: Session = Depends(get_session)) -> Event:
+    """Получить событие по ID из БАЗЫ ДАННЫХ"""
+    event = session.get(Event, id)
+    if event:
+        return event
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Event with supplied ID does not exist"
     )
 
 @event_router.post("/new")
-async def create_event(body: Event = Body(...)) -> dict:
-    """Создать новое событие"""
-
-    for event in events:
-        if event.id == body.id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Event with this ID already exists"
-            )
+async def create_event(new_event: Event, session: Session = Depends(get_session)) -> dict:
+    """Создать новое событие в БАЗЕ ДАННЫХ"""
+    session.add(new_event)
+    session.commit()
+    session.refresh(new_event)
     
-    events.append(body)
     return {
-        "message": "Event created successfully"
+        "message": "Event created successfully",
+        "id": new_event.id  # Добавляем ID в ответ
     }
 
+@event_router.put("/{id}", response_model=Event)
+async def update_event(id: int, new_data: EventUpdate, session: Session = Depends(get_session)) -> Event:
+    """Обновить событие в БАЗЕ ДАННЫХ"""
+    event = session.get(Event, id)
+    if event:
+        event_data = new_data.dict(exclude_unset=True)
+        for key, value in event_data.items():
+            setattr(event, key, value)
+        session.add(event)
+        session.commit()
+        session.refresh(event)
+        return event
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Event with supplied ID does not exist"
+    )
+
 @event_router.delete("/{id}")
-async def delete_event(id: int) -> dict:
-    """Удалить событие по ID"""
-    for event in events:
-        if event.id == id:
-            events.remove(event)
-            return {
-                "message": "Event deleted successfully"
-            }
+async def delete_event(id: int, session: Session = Depends(get_session)) -> dict:
+    """Удалить событие по ID из БАЗЫ ДАННЫХ"""
+    event = session.get(Event, id)
+    if event:
+        session.delete(event)
+        session.commit()
+        return {
+            "message": "Event deleted successfully"
+        }
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Event with supplied ID does not exist"
     )
 
 @event_router.delete("/")
-async def delete_all_events() -> dict:
-    """Удалить все события"""
-    events.clear()
+async def delete_all_events(session: Session = Depends(get_session)) -> dict:
+    """Удалить все события из БАЗЫ ДАННЫХ"""
+    statement = select(Event)
+    events = session.exec(statement).all()
+    for event in events:
+        session.delete(event)
+    session.commit()
     return {
-        "message": "Events deleted successfully"
+        "message": "All events deleted successfully"
     }

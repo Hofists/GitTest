@@ -1,27 +1,22 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import EmailStr
 from typing import Optional, List
 from models.events import Event
+from sqlmodel import SQLModel, Field
 
-class User(BaseModel):
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
     email: EmailStr
     password: str
-    events: Optional[List[Event]] = []
     
     class Config:
         schema_extra = {
             "example": {
                 "email": "fastapi@packt.com",
-                "password": "strong!!!",
-                "events": []
+                "password": "rts1234"
             }
         }
 
-class NewUser(User):
-    """Модель для регистрации нового пользователя"""
-    pass
-
-class UserSignIn(BaseModel):
-    """Модель для входа пользователя"""
+class NewUser(SQLModel):
     email: EmailStr
     password: str
     
@@ -29,6 +24,18 @@ class UserSignIn(BaseModel):
         schema_extra = {
             "example": {
                 "email": "fastapi@packt.com",
-                "password": "strong!!!"
+                "password": "rts1234"
+            }
+        }
+
+class UserSignIn(SQLModel):
+    email: EmailStr
+    password: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "email": "fastapi@packt.com",
+                "password": "rts1234"
             }
         }
