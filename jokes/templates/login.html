@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="col-md-6 offset-md-3">
+    <h3>Вход в профиль</h3>
+    {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+    <form action="/user/login" method="post">
+        <div class="mb-3">
+            <label>Email</label>
+            <input type="email" name="email" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label>Пароль</label>
+            <input type="password" name="password" class="form-control" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Войти</button>
+    </form>
+</div>
+{% endblock %}

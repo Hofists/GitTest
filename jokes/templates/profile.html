@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Профиль: {{ user.username }}</h2>
+<p>Email: {{ user.email }}</p>
+
+<div class="mb-4">
+    <form action="/user/logout" method="post" class="d-inline">
+        <button class="btn btn-secondary">Выйти из профиля</button>
+    </form>
+    
+    <form action="/user/delete" method="post" class="d-inline ms-2" onsubmit="return confirm('Точно удалить профиль?');">
+        <button class="btn btn-danger">Удалить профиль</button>
+    </form>
+</div>
+
+<hr>
+
+<div class="row">
+    <div class="col-md-6">
+        <h4>Мои анекдоты</h4>
+        {% for joke in my_anecdotes %}
+        <div class="card mb-2">
+            <div class="card-body">
+                {{ joke.content }}
+                <form action="/anecdote/delete/{{ joke.id }}" method="post" class="mt-2">
+                    <button class="btn btn-danger btn-sm">Удалить</button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <p class="text-muted">Вы еще ничего не публиковали.</p>
+        {% endfor %}
+    </div>
+
+    <div class="col-md-6">
+        <h4>Избранное</h4>
+        {% for fav in favorites %}
+        <div class="card mb-2 bg-light">
+            <div class="card-body">
+                {{ fav.content }}
+            </div>
+        </div>
+        {% else %}
+        <p class="text-muted">Нет избранных анекдотов.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

@@ -1,19 +1,17 @@
 from sqlmodel import SQLModel, Session, create_engine
+from models.users import User
+from models.anecdotes import Anecdote
+from models.interactions import Rating, Favorite
 
-# Имя файла базы данных (SQLite для простоты, как в примере)
 database_file = "jokes.db"
 database_connection_string = f"sqlite:///{database_file}"
-
-# check_same_thread=False нужен только для SQLite
 connect_args = {"check_same_thread": False}
 
-engine_url = create_engine(database_connection_string, echo=True, connect_args=connect_args)
+engine = create_engine(database_connection_string, echo=True, connect_args=connect_args)
 
-def conn():
-    """Создает таблицы в БД при запуске"""
-    SQLModel.metadata.create_all(engine_url)
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
 
 def get_session():
-    """Генератор сессий для Dependency Injection в маршрутах"""
-    with Session(engine_url) as session:
+    with Session(engine) as session:
         yield session
