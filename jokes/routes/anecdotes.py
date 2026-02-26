@@ -6,6 +6,8 @@ from database.connection import get_session
 from database.dependence import get_current_user
 from models.anecdotes import Anecdote
 from models.users import User
+from models.inform_sys import InformSys  # Добавляем импорт
+from datetime import datetime
 
 router = APIRouter(tags=["Content Service"])
 templates = Jinja2Templates(directory="templates")
@@ -32,8 +34,22 @@ async def create_anecdote(
     if not user:
         return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
 
+    # Создаем анекдот
     new_joke = Anecdote(content=content, author_id=user.id)
     session.add(new_joke)
+    session.flush()  # Чтобы получить ID
+    
+    # Дублируем в inform_sys
+    inform_entry = InformSys(
+        source_table="anecdote",
+        original_id=new_joke.id,
+        content=content,
+        author_or_user_id=user.id,
+        publication_date=new_joke.publication_date,
+        likes_count=0
+    )
+    session.add(inform_entry)
+    
     session.commit()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -45,6 +61,17 @@ async def delete_anecdote(
 ):
     joke = session.get(Anecdote, anecdote_id)
     if joke and user and user.id == joke.author_id:
+        # Удаляем из inform_sys
+        inform_entry = session.exec(
+            select(InformSys).where(
+                InformSys.source_table == "anecdote",
+                InformSys.original_id == anecdote_id
+            )
+        ).first()
+        if inform_entry:
+            session.delete(inform_entry)
+        
+        # Удаляем анекдот
         session.delete(joke)
         session.commit()
         return RedirectResponse(url="/user/profile", status_code=status.HTTP_303_SEE_OTHER)

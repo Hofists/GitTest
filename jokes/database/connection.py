@@ -2,6 +2,7 @@ from sqlmodel import SQLModel, Session, create_engine
 from models.users import User
 from models.anecdotes import Anecdote
 from models.interactions import Rating, Favorite
+from models.inform_sys import InformSys
 
 database_file = "jokes.db"
 database_connection_string = f"sqlite:///{database_file}"
