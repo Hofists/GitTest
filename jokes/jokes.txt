@@ -1,0 +1,287 @@
+connection.py:
+from sqlmodel import SQLModel, Session, create_engine
+from models.users import User
+from models.anecdotes import Anecdote
+from models.interactions import Rating, Favorite
+
+database_file = "jokes.db"
+database_connection_string = f"sqlite:///{database_file}"
+connect_args = {"check_same_thread": False}
+
+engine = create_engine(database_connection_string, echo=True, connect_args=connect_args)
+
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+
+def get_session():
+    with Session(engine) as session:
+        yield session
+
+dependence.py:
+from fastapi import Request, Depends
+from sqlmodel import Session
+from database.connection import get_session
+from models.users import User
+
+def get_current_user(request: Request, session: Session = Depends(get_session)) -> User | None:
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return None
+    return session.get(User, int(user_id))
+
+models/anecdotes.py:
+from sqlmodel import SQLModel, Field
+from typing import Optional
+from datetime import datetime
+
+class Anecdote(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    content: str
+    author_id: int 
+    publication_date: datetime = Field(default_factory=datetime.utcnow)
+    likes_count: int = Field(default=0)
+
+
+models/users.py:
+from sqlmodel import SQLModel, Field
+from typing import Optional
+
+class User(SQLModel, table=True ):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, index=True)
+    password: str
+    username: str
+
+
+models/interactions.py:
+from sqlmodel import SQLModel, Field
+from typing import Optional
+
+class Rating(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int
+    anecdote_id: int  
+    value: int
+
+class Favorite(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int
+    anecdote_id: int
+
+
+routes/anecdotes.py:
+from fastapi import APIRouter, Depends, Request, Form, status
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlmodel import Session, select
+from database.connection import get_session
+from database.dependence import get_current_user
+from models.anecdotes import Anecdote
+from models.users import User
+
+router = APIRouter(tags=["Content Service"])
+templates = Jinja2Templates(directory="templates")
+
+@router.get("/")
+async def home_page(
+    request: Request, 
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user)
+):
+    anecdotes = session.exec(select(Anecdote).order_by(Anecdote.id.desc())).all()
+    return templates.TemplateResponse("home.html", {
+        "request": request, 
+        "anecdotes": anecdotes,
+        "user": user
+    })
+
+@router.post("/anecdote/new")
+async def create_anecdote(
+    content: str = Form(...),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    if not user:
+        return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    new_joke = Anecdote(content=content, author_id=user.id)
+    session.add(new_joke)
+    session.commit()
+    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+@router.post("/anecdote/delete/{anecdote_id}")
+async def delete_anecdote(
+    anecdote_id: int,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    joke = session.get(Anecdote, anecdote_id)
+    if joke and user and user.id == joke.author_id:
+        session.delete(joke)
+        session.commit()
+        return RedirectResponse(url="/user/profile", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/", status_code=status.HTTP_403_FORBIDDEN)
+
+
+routes/users.py:
+from fastapi import APIRouter, Depends, Request, Form, status, Response
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlmodel import Session, select
+from database.connection import get_session
+from database.dependence import get_current_user
+from models.users import User
+from models.anecdotes import Anecdote
+from models.interactions import Favorite
+
+user_router = APIRouter(prefix="/user", tags = ["User Service"])
+templates = Jinja2Templates(directory="templates")
+
+@user_router.get("/register")
+async def register_page(request: Request):
+    return templates.TemplateResponse("register.html", {"request": request})
+
+@user_router.post("/register")
+async def register_user(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    username: str = Form(...),
+    session: Session = Depends(get_session)
+):
+    existing_user = session.exec(select(User).where(User.email == email)).first()
+    if existing_user:
+        error_msg = "Неуспешная регистрация: пользователь с таким email уже существует"
+        return templates.TemplateResponse("register.html", {"request": request, "error": error_msg})
+
+    new_user = User(email=email, password=password, username=username)
+    session.add(new_user)
+    session.commit()
+    
+    return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@user_router.get("/login")
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@user_router.post("/login")
+async def login_user(
+    request: Request,
+    response: Response,
+    email: str = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_session)
+):
+    user = session.exec(select(User).where(User.email == email)).first()
+    
+    if not user or user.password != password:
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Неверный email или пароль"})
+
+    redirect = RedirectResponse(url="/user/profile", status_code=status.HTTP_303_SEE_OTHER)
+    redirect.set_cookie(key="user_id", value=str(user.id))
+    return redirect
+
+
+@user_router.get("/profile")
+async def profile_page(
+    request: Request, 
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    if not user:
+        return RedirectResponse(url="/user/login")
+
+    my_anecdotes = session.exec(select(Anecdote).where(Anecdote.author_id == user.id)).all()
+    
+    fav_links = session.exec(select(Favorite).where(Favorite.user_id == user.id)).all()
+    fav_anecdote_ids = [f.anecdote_id for f in fav_links]
+    
+    favorites = []
+    if fav_anecdote_ids:
+        favorites = session.exec(select(Anecdote).where(Anecdote.id.in_(fav_anecdote_ids))).all()
+
+    return templates.TemplateResponse("profile.html", {
+        "request": request, 
+        "user": user,
+        "my_anecdotes": my_anecdotes,
+        "favorites": favorites
+    })
+
+@user_router.post("/logout")
+async def logout():
+    response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie("user_id")
+    return response
+
+@user_router.post("/delete")
+async def delete_profile(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    if user:
+        session.delete(user)
+        session.commit()
+    
+    response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    response.delete_cookie("user_id")
+    return response
+
+
+routes/interactions.py:
+from fastapi import APIRouter, Depends, Form, status
+from fastapi.responses import RedirectResponse
+from sqlmodel import Session, select
+from database.connection import get_session
+from database.dependence import get_current_user
+from models.users import User
+from models.anecdotes import Anecdote
+from models.interactions import Favorite, Rating
+
+router = APIRouter(prefix="/interaction", tags=["Interaction Service"])
+
+@router.post("/rate/{anecdote_id}")
+async def rate_anecdote(
+    anecdote_id: int,
+    value: int = Form(...),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    if not user:
+        return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    existing = session.exec(select(Rating).where(Rating.user_id == user.id, Rating.anecdote_id == anecdote_id)).first()
+    
+    if existing:
+        existing.value = value
+        session.add(existing)
+    else:
+        new_rating = Rating(user_id=user.id, anecdote_id=anecdote_id, value=value)
+        session.add(new_rating)
+    
+    joke = session.get(Anecdote, anecdote_id)
+    if joke:
+        joke.likes_count += value 
+        session.add(joke)
+    
+    session.commit()
+    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+@router.post("/favorite/{anecdote_id}")
+async def toggle_favorite(
+    anecdote_id: int,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    if not user:
+        return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    existing = session.exec(select(Favorite).where(Favorite.user_id == user.id, Favorite.anecdote_id == anecdote_id)).first()
+    if existing:
+        session.delete(existing)
+    else:
+        session.add(Favorite(user_id=user.id, anecdote_id=anecdote_id))
+    
+    session.commit()
+    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+	
