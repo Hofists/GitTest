@@ -1,8 +1,31 @@
+main.py:
+import uvicorn
+from fastapi import FastAPI
+from database.connection import create_db_and_tables
+from routes.users import user_router
+from routes.anecdotes import router as anecdotes_router
+from routes.interactions import router as interaction_router
+
+app = FastAPI()
+
+app.include_router(user_router)
+app.include_router(anecdotes_router)
+app.include_router(interaction_router)
+
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+
+
 connection.py:
 from sqlmodel import SQLModel, Session, create_engine
 from models.users import User
 from models.anecdotes import Anecdote
 from models.interactions import Rating, Favorite
+from models.inform_sys import InformSys
 
 database_file = "jokes.db"
 database_connection_string = f"sqlite:///{database_file}"
@@ -17,6 +40,7 @@ def get_session():
     with Session(engine) as session:
         yield session
 
+
 dependence.py:
 from fastapi import Request, Depends
 from sqlmodel import Session
@@ -29,12 +53,14 @@ def get_current_user(request: Request, session: Session = Depends(get_session)) 
         return None
     return session.get(User, int(user_id))
 
+
 models/anecdotes.py:
 from sqlmodel import SQLModel, Field
 from typing import Optional
 from datetime import datetime
 
 class Anecdote(SQLModel, table=True):
+    __tablename__ = "anecdote"
     id: Optional[int] = Field(default=None, primary_key=True)
     content: str
     author_id: int 
@@ -42,15 +68,18 @@ class Anecdote(SQLModel, table=True):
     likes_count: int = Field(default=0)
 
 
+
 models/users.py:
 from sqlmodel import SQLModel, Field
 from typing import Optional
 
 class User(SQLModel, table=True ):
+    __tablename__ = "user"
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True)
     password: str
     username: str
+
 
 
 models/interactions.py:
@@ -58,15 +87,35 @@ from sqlmodel import SQLModel, Field
 from typing import Optional
 
 class Rating(SQLModel, table=True):
+    __tablename__ = "rating"
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int
     anecdote_id: int  
     value: int
 
 class Favorite(SQLModel, table=True):
+    __tablename__ = "favorite"
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int
     anecdote_id: int
+
+models/inform_sys.py:
+from sqlmodel import SQLModel, Field
+from typing import Optional
+from datetime import datetime
+
+class InformSys(SQLModel, table=True):
+    __tablename__ = "inform_sys"
+    source_table: str = Field(primary_key=True)
+    original_id: int = Field(primary_key=True)
+    content: Optional[str] = None
+    author_or_user_id: Optional[int] = None
+    publication_date: Optional[datetime] = None
+    likes_count: Optional[int] = None
+    anecdote_id: Optional[int] = None
+    value: Optional[int] = None
+    email: Optional[str] = None
+    username: Optional[str] = None
 
 
 routes/anecdotes.py:
@@ -78,6 +127,8 @@ from database.connection import get_session
 from database.dependence import get_current_user
 from models.anecdotes import Anecdote
 from models.users import User
+from models.inform_sys import InformSys  # Добавляем импорт
+from datetime import datetime
 
 router = APIRouter(tags=["Content Service"])
 templates = Jinja2Templates(directory="templates")
@@ -104,8 +155,22 @@ async def create_anecdote(
     if not user:
         return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
 
+    # Создаем анекдот
     new_joke = Anecdote(content=content, author_id=user.id)
     session.add(new_joke)
+    session.flush()  # Чтобы получить ID
+    
+    # Дублируем в inform_sys
+    inform_entry = InformSys(
+        source_table="anecdote",
+        original_id=new_joke.id,
+        content=content,
+        author_or_user_id=user.id,
+        publication_date=new_joke.publication_date,
+        likes_count=0
+    )
+    session.add(inform_entry)
+    
     session.commit()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -117,10 +182,22 @@ async def delete_anecdote(
 ):
     joke = session.get(Anecdote, anecdote_id)
     if joke and user and user.id == joke.author_id:
+        # Удаляем из inform_sys
+        inform_entry = session.exec(
+            select(InformSys).where(
+                InformSys.source_table == "anecdote",
+                InformSys.original_id == anecdote_id
+            )
+        ).first()
+        if inform_entry:
+            session.delete(inform_entry)
+        
+        # Удаляем анекдот
         session.delete(joke)
         session.commit()
         return RedirectResponse(url="/user/profile", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(url="/", status_code=status.HTTP_403_FORBIDDEN)
+
 
 
 routes/users.py:
@@ -133,6 +210,7 @@ from database.dependence import get_current_user
 from models.users import User
 from models.anecdotes import Anecdote
 from models.interactions import Favorite
+from models.inform_sys import InformSys  # Добавляем импорт
 
 user_router = APIRouter(prefix="/user", tags = ["User Service"])
 templates = Jinja2Templates(directory="templates")
@@ -154,12 +232,23 @@ async def register_user(
         error_msg = "Неуспешная регистрация: пользователь с таким email уже существует"
         return templates.TemplateResponse("register.html", {"request": request, "error": error_msg})
 
+    # Создаем пользователя
     new_user = User(email=email, password=password, username=username)
     session.add(new_user)
+    session.flush()  # Чтобы получить ID
+    
+    # Дублируем в inform_sys
+    inform_entry = InformSys(
+        source_table="user",
+        original_id=new_user.id,
+        email=email,
+        username=username
+    )
+    session.add(inform_entry)
+    
     session.commit()
     
     return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
-
 
 @user_router.get("/login")
 async def login_page(request: Request):
@@ -181,7 +270,6 @@ async def login_user(
     redirect = RedirectResponse(url="/user/profile", status_code=status.HTTP_303_SEE_OTHER)
     redirect.set_cookie(key="user_id", value=str(user.id))
     return redirect
-
 
 @user_router.get("/profile")
 async def profile_page(
@@ -220,12 +308,24 @@ async def delete_profile(
     session: Session = Depends(get_session)
 ):
     if user:
+        # Удаляем из inform_sys
+        inform_entry = session.exec(
+            select(InformSys).where(
+                InformSys.source_table == "user",
+                InformSys.original_id == user.id
+            )
+        ).first()
+        if inform_entry:
+            session.delete(inform_entry)
+        
+        # Удаляем пользователя
         session.delete(user)
         session.commit()
     
     response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie("user_id")
     return response
+
 
 
 routes/interactions.py:
@@ -237,6 +337,7 @@ from database.dependence import get_current_user
 from models.users import User
 from models.anecdotes import Anecdote
 from models.interactions import Favorite, Rating
+from models.inform_sys import InformSys  # Добавляем импорт
 
 router = APIRouter(prefix="/interaction", tags=["Interaction Service"])
 
@@ -253,16 +354,54 @@ async def rate_anecdote(
     existing = session.exec(select(Rating).where(Rating.user_id == user.id, Rating.anecdote_id == anecdote_id)).first()
     
     if existing:
+        old_value = existing.value
         existing.value = value
         session.add(existing)
+        
+        # Обновляем в inform_sys
+        inform_entry = session.exec(
+            select(InformSys).where(
+                InformSys.source_table == "rating",
+                InformSys.original_id == existing.id
+            )
+        ).first()
+        if inform_entry:
+            inform_entry.value = value
+            session.add(inform_entry)
     else:
         new_rating = Rating(user_id=user.id, anecdote_id=anecdote_id, value=value)
         session.add(new_rating)
+        session.flush()  # Чтобы получить ID
+        
+        # Дублируем в inform_sys
+        inform_entry = InformSys(
+            source_table="rating",
+            original_id=new_rating.id,
+            author_or_user_id=user.id,
+            anecdote_id=anecdote_id,
+            value=value
+        )
+        session.add(inform_entry)
     
     joke = session.get(Anecdote, anecdote_id)
     if joke:
-        joke.likes_count += value 
+        # Обновляем likes_count в анекдоте
+        if existing:
+            joke.likes_count = joke.likes_count - old_value + value
+        else:
+            joke.likes_count += value 
         session.add(joke)
+        
+        # Обновляем likes_count в inform_sys для анекдота
+        inform_anecdote = session.exec(
+            select(InformSys).where(
+                InformSys.source_table == "anecdote",
+                InformSys.original_id == anecdote_id
+            )
+        ).first()
+        if inform_anecdote:
+            inform_anecdote.likes_count = joke.likes_count
+            session.add(inform_anecdote)
     
     session.commit()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
@@ -277,11 +416,214 @@ async def toggle_favorite(
         return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
 
     existing = session.exec(select(Favorite).where(Favorite.user_id == user.id, Favorite.anecdote_id == anecdote_id)).first()
+    
     if existing:
+        # Удаляем из inform_sys
+        inform_entry = session.exec(
+            select(InformSys).where(
+                InformSys.source_table == "favorite",
+                InformSys.original_id == existing.id
+            )
+        ).first()
+        if inform_entry:
+            session.delete(inform_entry)
+        
         session.delete(existing)
     else:
-        session.add(Favorite(user_id=user.id, anecdote_id=anecdote_id))
+        new_favorite = Favorite(user_id=user.id, anecdote_id=anecdote_id)
+        session.add(new_favorite)
+        session.flush()  # Чтобы получить ID
+        
+        # Дублируем в inform_sys
+        inform_entry = InformSys(
+            source_table="favorite",
+            original_id=new_favorite.id,
+            author_or_user_id=user.id,
+            anecdote_id=anecdote_id
+        )
+        session.add(inform_entry)
     
     session.commit()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-	
+
+templates/base.html:
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Анекдоты есть</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">Анекдоты есть</a>
+            <div class="navbar-nav">
+                <a class="nav-link" href="/">Лента</a>
+                {% if user %}
+                    <a class="nav-link active" href="/user/profile">{{ user.username }} (Профиль)</a>
+                {% else %}
+                    <a class="nav-link" href="/user/login">Вход</a>
+                    <a class="nav-link" href="/user/register">Регистрация</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+    <div class="container mt-4">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
+
+
+templates/home.html:
+{% extends "base.html" %}
+{% block content %}
+
+{% if user %}
+<div class="card mb-4">
+    <div class="card-body">
+        <h5>Добавить анекдот</h5>
+        <form action="/anecdote/new" method="post">
+            <textarea name="content" class="form-control mb-2" required placeholder="Текст анекдота..."></textarea>
+            <button class="btn btn-primary btn-sm">Опубликовать</button>
+        </form>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">Чтобы добавлять и оценивать анекдоты, <a href="/user/login">войдите</a>.</div>
+{% endif %}
+
+<h3>Лента анекдотов</h3>
+{% for joke in anecdotes %}
+<div class="card mb-3">
+    <div class="card-body">
+        <p class="fs-5">{{ joke.content }}</p>
+        <div class="d-flex justify-content-between align-items-center">
+            <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
+            
+            {% if user %}
+            <div class="btn-group">
+                <!-- Лайк -->
+                <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
+                    <input type="hidden" name="value" value="1">
+                    <button class="btn btn-outline-success btn-sm">+</button>
+                </form>
+                <!-- Дизлайк -->
+                <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline ms-1">
+                    <input type="hidden" name="value" value="-1">
+                    <button class="btn btn-outline-danger btn-sm">-</button>
+                </form>
+                <!-- Избранное -->
+                <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline ms-2">
+                    <button class="btn btn-outline-warning btn-sm">🌟</button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endblock %}
+
+
+templates/login.html:
+{% extends "base.html" %}
+{% block content %}
+<div class="col-md-6 offset-md-3">
+    <h3>Вход в профиль</h3>
+    {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+    <form action="/user/login" method="post">
+        <div class="mb-3">
+            <label>Email</label>
+            <input type="email" name="email" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label>Пароль</label>
+            <input type="password" name="password" class="form-control" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Войти</button>
+    </form>
+</div>
+{% endblock %}
+
+
+templates/profile.html:
+{% extends "base.html" %}
+{% block content %}
+<h2>Профиль: {{ user.username }}</h2>
+<p>Email: {{ user.email }}</p>
+
+<div class="mb-4">
+    <form action="/user/logout" method="post" class="d-inline">
+        <button class="btn btn-secondary">Выйти из профиля</button>
+    </form>
+    
+    <form action="/user/delete" method="post" class="d-inline ms-2" onsubmit="return confirm('Точно удалить профиль?');">
+        <button class="btn btn-danger">Удалить профиль</button>
+    </form>
+</div>
+
+<hr>
+
+<div class="row">
+    <div class="col-md-6">
+        <h4>Мои анекдоты</h4>
+        {% for joke in my_anecdotes %}
+        <div class="card mb-2">
+            <div class="card-body">
+                {{ joke.content }}
+                <form action="/anecdote/delete/{{ joke.id }}" method="post" class="mt-2">
+                    <button class="btn btn-danger btn-sm">Удалить</button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <p class="text-muted">Вы еще ничего не публиковали.</p>
+        {% endfor %}
+    </div>
+
+    <div class="col-md-6">
+        <h4>Избранное</h4>
+        {% for fav in favorites %}
+        <div class="card mb-2 bg-light">
+            <div class="card-body">
+                {{ fav.content }}
+            </div>
+        </div>
+        {% else %}
+        <p class="text-muted">Нет избранных анекдотов.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+
+templates/register.html:
+{% extends "base.html" %}
+{% block content %}
+<div class="col-md-6 offset-md-3">
+    <h3>Регистрация</h3>
+    {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+    <form action="/user/register" method="post">
+        <div class="mb-3">
+            <label>Email</label>
+            <input type="email" name="email" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label>Имя пользователя</label>
+            <input type="text" name="username" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label>Пароль</label>
+            <input type="password" name="password" class="form-control" required>
+        </div>
+        <button type="submit" class="btn btn-success">Зарегистрироваться</button>
+    </form>
+</div>
+{% endblock %}
+
