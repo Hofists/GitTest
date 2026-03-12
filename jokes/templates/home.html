@@ -15,6 +15,47 @@
 <div class="alert alert-info">Чтобы добавлять и оценивать анекдоты, <a href="/user/login">войдите</a>.</div>
 {% endif %}
 
+{% if recommended %}
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        {% if user %}
+            Рекомендовано для вас
+        {% else %}
+            Популярные анекдоты
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% for joke in recommended %}
+            <div class="col-md-6 mb-2">
+                <div class="p-2 border rounded">
+                    <p>{{ joke.content }}</p>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
+                        {% if user %}
+                        <div class="btn-group btn-group-sm">
+                            <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
+                                <input type="hidden" name="value" value="1">
+                                <button class="btn btn-outline-success btn-sm">+</button>
+                            </form>
+                            <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
+                                <input type="hidden" name="value" value="-1">
+                                <button class="btn btn-outline-danger btn-sm">-</button>
+                            </form>
+                            <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline">
+                                <button class="btn btn-outline-warning btn-sm">🌟</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <h3>Лента анекдотов</h3>
 {% for joke in anecdotes %}
 <div class="card mb-3">
