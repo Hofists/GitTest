@@ -15,6 +15,7 @@
 <div class="alert alert-info">Чтобы добавлять и оценивать анекдоты, <a href="/user/login">войдите</a>.</div>
 {% endif %}
 
+<!-- БЛОК РЕКОМЕНДАЦИЙ -->
 {% if recommended %}
 <div class="card mb-4">
     <div class="card-header bg-primary text-white">
@@ -63,20 +64,17 @@
         <p class="fs-5">{{ joke.content }}</p>
         <div class="d-flex justify-content-between align-items-center">
             <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
-            
+
             {% if user %}
             <div class="btn-group">
-                <!-- Лайк -->
                 <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
                     <input type="hidden" name="value" value="1">
                     <button class="btn btn-outline-success btn-sm">+</button>
                 </form>
-                <!-- Дизлайк -->
                 <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline ms-1">
                     <input type="hidden" name="value" value="-1">
                     <button class="btn btn-outline-danger btn-sm">-</button>
                 </form>
-                <!-- Избранное -->
                 <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline ms-2">
                     <button class="btn btn-outline-warning btn-sm">🌟</button>
                 </form>
