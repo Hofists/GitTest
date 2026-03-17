@@ -6,7 +6,7 @@ from database.dependence import get_current_user
 from models.users import User
 from models.anecdotes import Anecdote
 from models.interactions import Favorite, Rating
-from models.inform_sys import InformSys  # Добавляем импорт
+from models.inform_sys import InformSys
 
 router = APIRouter(prefix="/interaction", tags=["Interaction Service"])
 
@@ -87,30 +87,12 @@ async def toggle_favorite(
     existing = session.exec(select(Favorite).where(Favorite.user_id == user.id, Favorite.anecdote_id == anecdote_id)).first()
     
     if existing:
-        # Удаляем из inform_sys
-        inform_entry = session.exec(
-            select(InformSys).where(
-                InformSys.source_table == "favorite",
-                InformSys.original_id == existing.id
-            )
-        ).first()
-        if inform_entry:
-            session.delete(inform_entry)
-        
+        # Удаляем только из базовой таблицы
         session.delete(existing)
     else:
+        # Добавляем только в базовую таблицу (без дублирования в inform_sys)
         new_favorite = Favorite(user_id=user.id, anecdote_id=anecdote_id)
         session.add(new_favorite)
-        session.flush()  # Чтобы получить ID
-        
-        # Дублируем в inform_sys
-        inform_entry = InformSys(
-            source_table="favorite",
-            original_id=new_favorite.id,
-            author_or_user_id=user.id,
-            anecdote_id=anecdote_id
-        )
-        session.add(inform_entry)
     
     session.commit()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)

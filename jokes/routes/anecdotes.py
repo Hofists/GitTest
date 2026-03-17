@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Request, Form, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 from database.connection import get_session
@@ -13,18 +13,13 @@ from datetime import datetime
 router = APIRouter(tags=["Content Service"])
 templates = Jinja2Templates(directory="templates")
 
-
 def _format_anecdote(inform: InformSys) -> dict:
-    """
-    Преобразует объект InformSys с source_table='anecdote' в словарь,
-    содержащий поля id, content, likes_count, которые ожидает шаблон.
-    """
+    """Форматируем объекты inform_sys для шаблона HTML"""
     return {
-        "id": inform.original_id,                     # используем original_id как id анекдота
-        "content": inform.content or "",              # защита от None
+        "id": inform.original_id,
+        "content": inform.content or "",
         "likes_count": inform.likes_count or 0
     }
-
 
 @router.get("/")
 async def home_page(
@@ -32,12 +27,12 @@ async def home_page(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user)
 ):
-    # Основная лента (все анекдоты, сортировка по убыванию ID)
+    # Общая лента
     anecdotes = session.exec(
         select(Anecdote).order_by(Anecdote.id.desc())
     ).all()
 
-    # Рекомендации: для авторизованных — персональные, для гостей — популярные
+    # Интеллектуальный компонент
     recommended = []
     if user:
         recs = get_recommendations_for_user(session, user.id, limit=5)
@@ -65,7 +60,7 @@ async def create_anecdote(
 
     new_joke = Anecdote(content=content, author_id=user.id)
     session.add(new_joke)
-    session.flush()  # получаем ID
+    session.flush() 
 
     inform_entry = InformSys(
         source_table="anecdote",
@@ -76,10 +71,8 @@ async def create_anecdote(
         likes_count=0
     )
     session.add(inform_entry)
-
     session.commit()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-
 
 @router.post("/anecdote/delete/{anecdote_id}")
 async def delete_anecdote(
@@ -102,3 +95,32 @@ async def delete_anecdote(
         session.commit()
         return RedirectResponse(url="/user/profile", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(url="/", status_code=status.HTTP_403_FORBIDDEN)
+
+@router.get("/api/recommendations/personal", summary="Получить персональные рекомендации")
+async def api_get_personal_recommendations(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    """
+    Возвращает список рекомендованных анекдотов для авторизованного пользователя
+    на основе интеллектуальной компоненты (коллаборативной фильтрации).
+    """
+    if not user:
+        return JSONResponse(
+            status_code=401, 
+            content={"detail": "Для получения персональных рекомендаций необходима авторизация."}
+        )
+    
+    recs = get_recommendations_for_user(session, user.id, limit=5)
+    return {"user_id": user.id, "recommended_anecdotes": [_format_anecdote(a) for a in recs]}
+
+
+@router.get("/api/recommendations/popular", summary="Получить популярные анекдоты")
+async def api_get_popular_recommendations(
+    session: Session = Depends(get_session)
+):
+    """
+    Возвращает топ популярных анекдотов на основе общего количества лайков.
+    """
+    recs = get_popular_anecdotes(session, limit=5)
+    return {"popular_anecdotes": [_format_anecdote(a) for a in recs]}

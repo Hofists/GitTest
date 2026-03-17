@@ -1,87 +1,97 @@
 {% extends "base.html" %}
+
 {% block content %}
-
-{% if user %}
-<div class="card mb-4">
-    <div class="card-body">
-        <h5>Добавить анекдот</h5>
-        <form action="/anecdote/new" method="post">
-            <textarea name="content" class="form-control mb-2" required placeholder="Текст анекдота..."></textarea>
-            <button class="btn btn-primary btn-sm">Опубликовать</button>
-        </form>
-    </div>
-</div>
-{% else %}
-<div class="alert alert-info">Чтобы добавлять и оценивать анекдоты, <a href="/user/login">войдите</a>.</div>
-{% endif %}
-
-<!-- БЛОК РЕКОМЕНДАЦИЙ -->
-{% if recommended %}
-<div class="card mb-4">
-    <div class="card-header bg-primary text-white">
+<div class="row">
+    <div class="col-12 mb-4">
         {% if user %}
-            Рекомендовано для вас
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">Добавить анекдот</h5>
+                <form action="/anecdote/new" method="post">
+                    <textarea name="content" class="form-control mb-2" required placeholder="Текст анекдота..."></textarea>
+                    <button class="btn btn-primary btn-sm">Опубликовать</button>
+                </form>
+            </div>
+        </div>
         {% else %}
-            Популярные анекдоты
+        <div class="alert alert-info shadow-sm">
+            Чтобы добавлять и оценивать анекдоты, <a href="/user/login">войдите в систему</a>.
+        </div>
         {% endif %}
     </div>
-    <div class="card-body">
-        <div class="row">
-            {% for joke in recommended %}
-            <div class="col-md-6 mb-2">
-                <div class="p-2 border rounded">
-                    <p>{{ joke.content }}</p>
-                    <div class="d-flex justify-content-between align-items-center">
-                        <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
-                        {% if user %}
-                        <div class="btn-group btn-group-sm">
-                            <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
-                                <input type="hidden" name="value" value="1">
-                                <button class="btn btn-outline-success btn-sm">+</button>
-                            </form>
-                            <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
-                                <input type="hidden" name="value" value="-1">
-                                <button class="btn btn-outline-danger btn-sm">-</button>
-                            </form>
-                            <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline">
-                                <button class="btn btn-outline-warning btn-sm">🌟</button>
-                            </form>
+
+    {% if recommended %}
+    <div class="col-12 mb-4">
+        <div class="card border-primary shadow-sm">
+            <div class="card-header bg-primary text-white font-weight-bold">
+                {% if user %}
+                    💡 Рекомендовано специально для вас
+                {% else %}
+                    🔥 Популярные анекдоты
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for joke in recommended %}
+                    <div class="col-md-6 mb-3">
+                        <div class="p-3 border rounded h-100 bg-light">
+                            <p class="fs-6">{{ joke.content }}</p>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
+                                {% if user %}
+                                <div class="btn-group">
+                                    <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
+                                        <input type="hidden" name="value" value="1">
+                                        <button class="btn btn-outline-success btn-sm">+</button>
+                                    </form>
+                                    <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline ms-1">
+                                        <input type="hidden" name="value" value="-1">
+                                        <button class="btn btn-outline-danger btn-sm">-</button>
+                                    </form>
+                                    <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline ms-1">
+                                        <button class="btn btn-outline-warning btn-sm">★</button>
+                                    </form>
+                                </div>
+                                {% endif %}
+                            </div>
                         </div>
-                        {% endif %}
                     </div>
+                    {% endfor %}
                 </div>
             </div>
-            {% endfor %}
         </div>
     </div>
-</div>
-{% endif %}
+    {% endif %}
 
-<h3>Лента анекдотов</h3>
-{% for joke in anecdotes %}
-<div class="card mb-3">
-    <div class="card-body">
-        <p class="fs-5">{{ joke.content }}</p>
-        <div class="d-flex justify-content-between align-items-center">
-            <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
-
-            {% if user %}
-            <div class="btn-group">
-                <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
-                    <input type="hidden" name="value" value="1">
-                    <button class="btn btn-outline-success btn-sm">+</button>
-                </form>
-                <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline ms-1">
-                    <input type="hidden" name="value" value="-1">
-                    <button class="btn btn-outline-danger btn-sm">-</button>
-                </form>
-                <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline ms-2">
-                    <button class="btn btn-outline-warning btn-sm">🌟</button>
-                </form>
+    <div class="col-12">
+        <h3 class="mb-3">Лента анекдотов</h3>
+        {% for joke in anecdotes %}
+        <div class="card mb-3 shadow-sm">
+            <div class="card-body">
+                <p class="fs-5">{{ joke.content }}</p>
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
+                    {% if user %}
+                    <div class="btn-group">
+                        <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
+                            <input type="hidden" name="value" value="1">
+                            <button class="btn btn-outline-success btn-sm">+</button>
+                        </form>
+                        <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline ms-1">
+                            <input type="hidden" name="value" value="-1">
+                            <button class="btn btn-outline-danger btn-sm">-</button>
+                        </form>
+                        <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline ms-1">
+                            <button class="btn btn-outline-warning btn-sm">★</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
             </div>
-            {% endif %}
         </div>
+        {% else %}
+        <p class="text-muted">Анекдотов пока нет.</p>
+        {% endfor %}
     </div>
 </div>
-{% endfor %}
 {% endblock %}

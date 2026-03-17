@@ -7,9 +7,8 @@ from database.dependence import get_current_user
 from models.users import User
 from models.anecdotes import Anecdote
 from models.interactions import Favorite
-from models.inform_sys import InformSys  # Добавляем импорт
 
-user_router = APIRouter(prefix="/user", tags = ["User Service"])
+user_router = APIRouter(prefix="/user", tags=["User Service"])
 templates = Jinja2Templates(directory="templates")
 
 @user_router.get("/register")
@@ -29,20 +28,9 @@ async def register_user(
         error_msg = "Неуспешная регистрация: пользователь с таким email уже существует"
         return templates.TemplateResponse("register.html", {"request": request, "error": error_msg})
 
-    # Создаем пользователя
+    # Создаем пользователя (без дублирования в inform_sys)
     new_user = User(email=email, password=password, username=username)
     session.add(new_user)
-    session.flush()  # Чтобы получить ID
-    
-    # Дублируем в inform_sys
-    inform_entry = InformSys(
-        source_table="user",
-        original_id=new_user.id,
-        email=email,
-        username=username
-    )
-    session.add(inform_entry)
-    
     session.commit()
     
     return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -105,17 +93,7 @@ async def delete_profile(
     session: Session = Depends(get_session)
 ):
     if user:
-        # Удаляем из inform_sys
-        inform_entry = session.exec(
-            select(InformSys).where(
-                InformSys.source_table == "user",
-                InformSys.original_id == user.id
-            )
-        ).first()
-        if inform_entry:
-            session.delete(inform_entry)
-        
-        # Удаляем пользователя
+        # Удаляем только пользователя (связи в inform_sys для user больше нет)
         session.delete(user)
         session.commit()
     

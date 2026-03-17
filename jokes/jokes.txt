@@ -68,7 +68,6 @@ class Anecdote(SQLModel, table=True):
     likes_count: int = Field(default=0)
 
 
-
 models/users.py:
 from sqlmodel import SQLModel, Field
 from typing import Optional
@@ -79,7 +78,6 @@ class User(SQLModel, table=True ):
     email: str = Field(unique=True, index=True)
     password: str
     username: str
-
 
 
 models/interactions.py:
@@ -98,6 +96,7 @@ class Favorite(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int
     anecdote_id: int
+
 
 models/inform_sys.py:
 from sqlmodel import SQLModel, Field
@@ -127,24 +126,53 @@ from database.connection import get_session
 from database.dependence import get_current_user
 from models.anecdotes import Anecdote
 from models.users import User
-from models.inform_sys import InformSys  # Добавляем импорт
+from models.inform_sys import InformSys
+from services.recommendations import get_recommendations_for_user, get_popular_anecdotes
 from datetime import datetime
 
 router = APIRouter(tags=["Content Service"])
 templates = Jinja2Templates(directory="templates")
 
+
+def _format_anecdote(inform: InformSys) -> dict:
+    """
+    Преобразует объект InformSys с source_table='anecdote' в словарь,
+    содержащий поля id, content, likes_count, которые ожидает шаблон.
+    """
+    return {
+        "id": inform.original_id,                     # используем original_id как id анекдота
+        "content": inform.content or "",              # защита от None
+        "likes_count": inform.likes_count or 0
+    }
+
+
 @router.get("/")
 async def home_page(
-    request: Request, 
+    request: Request,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user)
 ):
-    anecdotes = session.exec(select(Anecdote).order_by(Anecdote.id.desc())).all()
+    # Основная лента (все анекдоты, сортировка по убыванию ID)
+    anecdotes = session.exec(
+        select(Anecdote).order_by(Anecdote.id.desc())
+    ).all()
+
+    # Рекомендации: для авторизованных — персональные, для гостей — популярные
+    recommended = []
+    if user:
+        recs = get_recommendations_for_user(session, user.id, limit=5)
+        recommended = [_format_anecdote(a) for a in recs]
+    else:
+        recs = get_popular_anecdotes(session, limit=5)
+        recommended = [_format_anecdote(a) for a in recs]
+
     return templates.TemplateResponse("home.html", {
-        "request": request, 
+        "request": request,
         "anecdotes": anecdotes,
-        "user": user
+        "user": user,
+        "recommended": recommended
     })
+
 
 @router.post("/anecdote/new")
 async def create_anecdote(
@@ -155,12 +183,10 @@ async def create_anecdote(
     if not user:
         return RedirectResponse(url="/user/login", status_code=status.HTTP_303_SEE_OTHER)
 
-    # Создаем анекдот
     new_joke = Anecdote(content=content, author_id=user.id)
     session.add(new_joke)
-    session.flush()  # Чтобы получить ID
-    
-    # Дублируем в inform_sys
+    session.flush()  # получаем ID
+
     inform_entry = InformSys(
         source_table="anecdote",
         original_id=new_joke.id,
@@ -170,9 +196,10 @@ async def create_anecdote(
         likes_count=0
     )
     session.add(inform_entry)
-    
+
     session.commit()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
 
 @router.post("/anecdote/delete/{anecdote_id}")
 async def delete_anecdote(
@@ -182,7 +209,6 @@ async def delete_anecdote(
 ):
     joke = session.get(Anecdote, anecdote_id)
     if joke and user and user.id == joke.author_id:
-        # Удаляем из inform_sys
         inform_entry = session.exec(
             select(InformSys).where(
                 InformSys.source_table == "anecdote",
@@ -191,13 +217,11 @@ async def delete_anecdote(
         ).first()
         if inform_entry:
             session.delete(inform_entry)
-        
-        # Удаляем анекдот
+
         session.delete(joke)
         session.commit()
         return RedirectResponse(url="/user/profile", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse(url="/", status_code=status.HTTP_403_FORBIDDEN)
-
 
 
 routes/users.py:
@@ -327,7 +351,6 @@ async def delete_profile(
     return response
 
 
-
 routes/interactions.py:
 from fastapi import APIRouter, Depends, Form, status
 from fastapi.responses import RedirectResponse
@@ -446,6 +469,7 @@ async def toggle_favorite(
     session.commit()
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
+
 templates/base.html:
 <!DOCTYPE html>
 <html lang="ru">
@@ -494,6 +518,48 @@ templates/home.html:
 <div class="alert alert-info">Чтобы добавлять и оценивать анекдоты, <a href="/user/login">войдите</a>.</div>
 {% endif %}
 
+<!-- БЛОК РЕКОМЕНДАЦИЙ -->
+{% if recommended %}
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white">
+        {% if user %}
+            Рекомендовано для вас
+        {% else %}
+            Популярные анекдоты
+        {% endif %}
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% for joke in recommended %}
+            <div class="col-md-6 mb-2">
+                <div class="p-2 border rounded">
+                    <p>{{ joke.content }}</p>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
+                        {% if user %}
+                        <div class="btn-group btn-group-sm">
+                            <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
+                                <input type="hidden" name="value" value="1">
+                                <button class="btn btn-outline-success btn-sm">+</button>
+                            </form>
+                            <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
+                                <input type="hidden" name="value" value="-1">
+                                <button class="btn btn-outline-danger btn-sm">-</button>
+                            </form>
+                            <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline">
+                                <button class="btn btn-outline-warning btn-sm">🌟</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <h3>Лента анекдотов</h3>
 {% for joke in anecdotes %}
 <div class="card mb-3">
@@ -501,20 +567,17 @@ templates/home.html:
         <p class="fs-5">{{ joke.content }}</p>
         <div class="d-flex justify-content-between align-items-center">
             <small class="text-muted">Рейтинг: {{ joke.likes_count }}</small>
-            
+
             {% if user %}
             <div class="btn-group">
-                <!-- Лайк -->
                 <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline">
                     <input type="hidden" name="value" value="1">
                     <button class="btn btn-outline-success btn-sm">+</button>
                 </form>
-                <!-- Дизлайк -->
                 <form action="/interaction/rate/{{ joke.id }}" method="post" class="d-inline ms-1">
                     <input type="hidden" name="value" value="-1">
                     <button class="btn btn-outline-danger btn-sm">-</button>
                 </form>
-                <!-- Избранное -->
                 <form action="/interaction/favorite/{{ joke.id }}" method="post" class="d-inline ms-2">
                     <button class="btn btn-outline-warning btn-sm">🌟</button>
                 </form>
@@ -525,7 +588,6 @@ templates/home.html:
 </div>
 {% endfor %}
 {% endblock %}
-
 
 templates/login.html:
 {% extends "base.html" %}
@@ -548,6 +610,7 @@ templates/login.html:
     </form>
 </div>
 {% endblock %}
+
 
 
 templates/profile.html:
@@ -626,4 +689,5 @@ templates/register.html:
     </form>
 </div>
 {% endblock %}
+
 
